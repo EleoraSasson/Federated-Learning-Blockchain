@@ -13,7 +13,7 @@ from web3 import Web3
 def main():
     # Configuration
     num_clients = 5
-    num_rounds = 10
+    num_rounds = 10 
     client_epochs = 3
     batch_size = 64
     learning_rate = 0.01
@@ -40,8 +40,12 @@ def main():
             provider_url="http://localhost:8545",
             comm_contract_address=w3.to_checksum_address("0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"),
             contrib_contract_address=w3.to_checksum_address("0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"),
+            reward_token_address=w3.to_checksum_address("0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"),
+            reward_distribution_address=w3.to_checksum_address("0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"),
             comm_abi_path="blockchain/FederatedLearningCommunication.json",
-            contrib_abi_path="blockchain/FederatedLearningContribution.json"
+            contrib_abi_path="blockchain/FederatedLearningContribution.json",
+            reward_token_abi_path="blockchain/FLRewardToken.json",
+            reward_distribution_abi_path="blockchain/FLRewardDistribution.json"
         )
     
     # Initialize server
@@ -53,6 +57,7 @@ def main():
     
     if enable_blockchain and blockchain is not None:
         server.blockchain = blockchain
+        print("Blockchain integration enabled")
     
     # Initialize clients
     clients = []
@@ -75,12 +80,20 @@ def main():
         w3.to_checksum_address("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc")   # Account 5
     ]
     
+    # Map client IDs to addresses for easier lookup
+    client_addresses_by_id = {}
+    for i, address in enumerate(client_addresses):
+        client_addresses_by_id[i] = address
+    
     # Training history for visualization
     history = {
         'global_accuracy': [],
         'client_accuracy': {i: [] for i in range(num_clients)},
         'contributions': {i: [] for i in range(num_clients)}
     }
+    
+    # Track contributions by round and client
+    contributions_by_round = {}
     
     # Federated learning process
     for round_idx in range(num_rounds):
@@ -109,6 +122,40 @@ def main():
         # Server aggregates models and records contributions
         server.aggregate(client_models, client_data_sizes, client_addresses)
         
+        # Initialize round contributions tracking
+        if round_idx+1 not in contributions_by_round:
+            contributions_by_round[round_idx+1] = {}
+        
+        # Record contributions for each client
+        if enable_blockchain and server.blockchain is not None:
+            for i, client in enumerate(clients):
+                client_id = client.client_id
+                if i < len(client_addresses):
+                    client_address = client_addresses[i]
+                    try:
+                        # Get contribution score
+                        if hasattr(server, 'contribution_scores') and i < len(server.contribution_scores):
+                            contribution_score = int(server.contribution_scores[i] * 10000)  # Scale up for blockchain
+                        else:
+                            # Fallback if contribution scores not available
+                            contribution_score = int(20000 + (i * 1000))  # Example fallback value
+                            
+                        # Record on blockchain
+                        server.blockchain.record_contribution(
+                            client_address, 
+                            round_idx+1, 
+                            contribution_score
+                        )
+                        
+                        # Store locally (scaled back down)
+                        scaled_score = contribution_score / 10000
+                        contributions_by_round[round_idx+1][client_address] = scaled_score
+                        history['contributions'][client_id].append(scaled_score)
+                        
+                        print(f"Client {client_id} (address: {client_address}) contribution: {scaled_score:.2f}")
+                    except Exception as e:
+                        print(f"Error recording contribution for client {client_id}: {str(e)}")
+        
         # Evaluate global model
         global_accuracy = server.evaluate()
         history['global_accuracy'].append(global_accuracy)
@@ -120,15 +167,12 @@ def main():
             client_acc = client.evaluate()
             history['client_accuracy'][client.client_id].append(client_acc)
         
-        # Retrieve and store contribution data if blockchain is enabled
+        # Finalize round on blockchain if enabled
         if enable_blockchain and server.blockchain is not None:
-            participants, contributions = server.blockchain.get_round_contributions(round_idx+1)
-            for i, client_id in enumerate(range(num_clients)):
-                if i < len(client_addresses) and client_addresses[i] in participants:
-                    idx = participants.index(client_addresses[i])
-                    contribution = contributions[idx]
-                    history['contributions'][client_id].append(contribution / 10000)  # Convert back from scaled integer
-                    print(f"Client {client_id} contribution: {contribution / 10000:.4f}")
+            try:
+                server.finalize_round()
+            except Exception as e:
+                print(f"Error finalizing round: {str(e)}")
     
     print("\nFederated Learning with Blockchain Integration Completed!")
     

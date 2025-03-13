@@ -66,15 +66,17 @@ contract FLContribution {
     
     // Function to get all participants' contributions for a specific round
     function getRoundContributions(uint256 roundId) public view returns (address[] memory, uint256[] memory) {
+        address[] memory participantsCopy = new address[](participants.length);
         uint256[] memory contributions = new uint256[](participants.length);
         
         for (uint256 i = 0; i < participants.length; i++) {
+            participantsCopy[i] = participants[i];
             contributions[i] = roundContributions[roundId][participants[i]];
         }
         
-        return (participants, contributions);
+        return (participantsCopy, contributions);
     }
-    
+        
     // Get all participants
     function getParticipants() public view returns (address[] memory) {
         return participants;

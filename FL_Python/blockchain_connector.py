@@ -4,7 +4,8 @@ from web3 import Web3
 
 class BlockchainConnector:
     def __init__(self, provider_url, comm_contract_address, contrib_contract_address, 
-                 comm_abi_path, contrib_abi_path):
+                reward_token_address, reward_distribution_address,
+                comm_abi_path, contrib_abi_path, reward_token_abi_path, reward_distribution_abi_path):
         """
         Initialize the blockchain connector.
         
@@ -31,6 +32,22 @@ class BlockchainConnector:
         with open(contrib_abi_path) as f:
             contrib_json = json.load(f)
             contrib_abi = contrib_json["abi"]
+        
+        with open(reward_token_abi_path) as f:
+            reward_token_json = json.load(f)
+            reward_token_abi = reward_token_json["abi"]
+        
+        with open(reward_distribution_abi_path) as f:
+            reward_distribution_json = json.load(f)
+            reward_distribution_abi = reward_distribution_json["abi"]
+        
+        # Convert addresses to checksum format
+        reward_token_address = self.w3.to_checksum_address(reward_token_address)
+        reward_distribution_address = self.w3.to_checksum_address(reward_distribution_address)
+        
+        # Initialize contract instances
+        self.reward_token_contract = self.w3.eth.contract(address=reward_token_address, abi=reward_token_abi)
+        self.reward_dist_contract = self.w3.eth.contract(address=reward_distribution_address, abi=reward_distribution_abi)
         
         # Initialize contract instances
         self.comm_contract = self.w3.eth.contract(address=comm_contract_address, abi=comm_abi)
@@ -198,6 +215,28 @@ class BlockchainConnector:
         """
         return self.contrib_contract.functions.getParticipants().call()
 
+    def distribute_rewards(self, round_id):
+        """Distribute rewards for a completed round"""
+        tx_hash = self.reward_dist_contract.functions.distributeRewards(
+            round_id
+        ).transact({'from': self.account})
+            
+        tx_receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        print(f"Distributed rewards for round {round_id}. Transaction hash: {tx_hash.hex()}")
+            
+        return tx_receipt
+        
+    def get_token_balance(self, address):
+        """Get the token balance for an address"""
+        balance = self.reward_token_contract.functions.balanceOf(address).call()
+        # Convert from wei (10^18) to token units
+        return balance / (10 ** 18)
+        
+    def get_total_rewards(self, address):
+        """Get the total rewards earned by an address across all rounds"""
+        balance = self.get_token_balance(address)
+        return balance
+            
 
 # Example usage
 if __name__ == "__main__":

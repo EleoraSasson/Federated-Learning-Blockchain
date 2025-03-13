@@ -193,3 +193,28 @@ class FederatedServer:
             The global model
         """
         return copy.deepcopy(self.global_model)
+
+
+    def finalize_round(self):
+        """Finalize the current round and distribute rewards if blockchain is enabled"""
+        if not self.blockchain_enabled or self.blockchain is None:
+            return
+        
+        try:
+            # Publish the global model to the blockchain
+            model_hash = self.calculate_model_hash(self.global_model)
+            try:
+                self.blockchain.publish_global_model(self.current_round, model_hash)
+            except Exception as e:
+                print(f"Error publishing global model: {str(e)}")
+            
+            # Try to distribute rewards, with error handling
+            try:
+                self.blockchain.distribute_rewards(self.current_round)
+            except Exception as e:
+                print(f"Error distributing rewards: {str(e)}")
+                print("Continuing without reward distribution...")
+                
+        except Exception as e:
+            print(f"Error in finalize_round: {str(e)}")
+            print("Round finalization encountered issues but training will continue")
