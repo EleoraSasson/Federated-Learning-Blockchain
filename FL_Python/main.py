@@ -12,9 +12,9 @@ from web3 import Web3
 
 def main():
     # Configuration
-    num_clients = 5
-    num_rounds = 10 
-    client_epochs = 3
+    num_clients = 2
+    num_rounds = 1 
+    client_epochs = 1
     batch_size = 64
     learning_rate = 0.01
     enable_blockchain = True  # Set to True to enable blockchain integration
@@ -40,14 +40,13 @@ def main():
             provider_url="http://localhost:8545",
             comm_contract_address=w3.to_checksum_address("0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"),
             contrib_contract_address=w3.to_checksum_address("0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"),
-            reward_token_address=w3.to_checksum_address("0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"),
-            reward_distribution_address=w3.to_checksum_address("0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"),
+            reward_token_address=w3.to_checksum_address("0x809d550fca64d94Bd9F66E60752A544199cfAC3D"),
+            reward_distribution_address=w3.to_checksum_address("0x4c5859f0F772848b2D91F1D83E2Fe57935348029"),
             comm_abi_path="blockchain/FederatedLearningCommunication.json",
             contrib_abi_path="blockchain/FederatedLearningContribution.json",
             reward_token_abi_path="blockchain/FLRewardToken.json",
             reward_distribution_abi_path="blockchain/FLRewardDistribution.json"
-        )
-    
+)
     # Initialize server
     server = FederatedServer(
         global_model=global_model,
@@ -55,6 +54,11 @@ def main():
         blockchain_enabled=enable_blockchain
     )
     
+    if enable_blockchain and blockchain is not None:
+        server.blockchain = blockchain
+        print("Blockchain integration enabled")
+        blockchain.debug_contract_info()  # Add this line here
+
     if enable_blockchain and blockchain is not None:
         server.blockchain = blockchain
         print("Blockchain integration enabled")
@@ -171,6 +175,11 @@ def main():
         if enable_blockchain and server.blockchain is not None:
             try:
                 server.finalize_round()
+                # Display reward distribution after finalization
+                try:
+                    blockchain.display_reward_distribution(round_idx+1, client_addresses[:num_clients])
+                except Exception as e:
+                    print(f"Error displaying reward distribution: {str(e)}")
             except Exception as e:
                 print(f"Error finalizing round: {str(e)}")
     
@@ -188,6 +197,27 @@ def main():
             if client_contribs:
                 total = sum(client_contribs)
                 print(f"Client {client_id}: {total:.2f}")
+        
+        # Display final token balances
+        print("\nFinal Token Balances:")
+        for i, client_id in enumerate(range(num_clients)):
+            if i < len(client_addresses):
+                try:
+                    balance = blockchain.get_token_balance(client_addresses[i])
+                    print(f"Client {client_id}: {balance:.4f} FLT")
+                except Exception as e:
+                    print(f"Error getting token balance for Client {client_id}: {str(e)}")
+                    
+        # Display total reward distribution
+        print("\nTotal Rewards Distributed:")
+        for round_idx in range(num_rounds):
+            try:
+                rewards_distributed = blockchain.reward_dist_contract.functions.rewardsDistributed(round_idx+1).call()
+                if rewards_distributed:
+                    reward_per_round = blockchain.reward_dist_contract.functions.rewardPerRound().call() / (10**18)
+                    print(f"Round {round_idx+1}: {reward_per_round:.4f} FLT")
+            except Exception as e:
+                print(f"Error getting reward info for round {round_idx+1}: {str(e)}")
 
 if __name__ == "__main__":
     main()

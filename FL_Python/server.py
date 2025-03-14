@@ -203,18 +203,10 @@ class FederatedServer:
         try:
             # Publish the global model to the blockchain
             model_hash = self.calculate_model_hash(self.global_model)
-            try:
-                self.blockchain.publish_global_model(self.current_round, model_hash)
-            except Exception as e:
-                print(f"Error publishing global model: {str(e)}")
+            self.blockchain.publish_global_model(self.current_round, model_hash)
             
-            # Try to distribute rewards, with error handling
-            try:
-                self.blockchain.distribute_rewards(self.current_round)
-            except Exception as e:
-                print(f"Error distributing rewards: {str(e)}")
-                print("Continuing without reward distribution...")
-                
+            # Distribute rewards
+            self.blockchain.distribute_rewards(self.current_round)
+            
         except Exception as e:
-            print(f"Error in finalize_round: {str(e)}")
-            print("Round finalization encountered issues but training will continue")
+            print(f"Error finalizing round: {str(e)}")

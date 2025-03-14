@@ -236,7 +236,70 @@ class BlockchainConnector:
         """Get the total rewards earned by an address across all rounds"""
         balance = self.get_token_balance(address)
         return balance
+    
+    def display_reward_distribution(self, round_id, client_addresses):
+        """Display reward distribution information for a round"""
+        try:
+            # Check if rewards have been distributed for this round
+            rewards_distributed = self.reward_dist_contract.functions.rewardsDistributed(round_id).call()
             
+            if rewards_distributed:
+                # Get reward per round
+                reward_per_round = self.reward_dist_contract.functions.rewardPerRound().call() / (10**18)
+                print(f"\n--- Reward Distribution for Round {round_id} ---")
+                print(f"Reward per round: {reward_per_round:.4f} FLT")
+                
+                # Display token balances for participants
+                print("\nParticipant Token Balances:")
+                for address in client_addresses:
+                    try:
+                        balance = self.get_token_balance(address)
+                        print(f"Address {address[:10]}...: {balance:.4f} FLT")
+                    except Exception as e:
+                        print(f"Error getting balance for {address[:10]}...: {str(e)}")
+            else:
+                print(f"Rewards for round {round_id} have not yet been distributed.")
+        except Exception as e:
+            print(f"Error checking reward distribution: {str(e)}")
+            raise e
+    
+    def debug_contract_info(self):
+        """Print contract information for debugging purposes"""
+        print("\n---- Contract Debugging Information ----")
+        
+        # Check account
+        print(f"Using account: {self.account}")
+        
+        # Check contract addresses
+        print(f"Reward Token contract address: {self.reward_token_contract.address}")
+        print(f"Reward Distribution contract address: {self.reward_dist_contract.address}")
+        
+        # Try to call basic functions on contracts
+        try:
+            token_name = self.reward_token_contract.functions.name().call()
+            token_symbol = self.reward_token_contract.functions.symbol().call()
+            token_decimals = self.reward_token_contract.functions.decimals().call()
+            token_total_supply = self.reward_token_contract.functions.totalSupply().call()
+            token_owner = self.reward_token_contract.functions.owner().call()
+            
+            print(f"Token name: {token_name}")
+            print(f"Token symbol: {token_symbol}")
+            print(f"Token decimals: {token_decimals}")
+            print(f"Token total supply: {token_total_supply / (10**18)}")
+            print(f"Token owner: {token_owner}")
+            print(f"Current account is token owner: {token_owner == self.account}")
+        except Exception as e:
+            print(f"Error reading token information: {str(e)}")
+        
+        try:
+            dist_owner = self.reward_dist_contract.functions.owner().call()
+            reward_per_round = self.reward_dist_contract.functions.rewardPerRound().call()
+            
+            print(f"Distribution contract owner: {dist_owner}")
+            print(f"Reward per round: {reward_per_round / (10**18)}")
+            print(f"Current account is distribution owner: {dist_owner == self.account}")
+        except Exception as e:
+            print(f"Error reading distribution information: {str(e)}")
 
 # Example usage
 if __name__ == "__main__":

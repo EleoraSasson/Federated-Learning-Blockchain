@@ -1,45 +1,46 @@
+const hre = require("hardhat");
+
 async function main() {
-    // Deploy the communication contract
-    const FLComm = await ethers.getContractFactory("FLCommunication");
-    const flComm = await FLComm.deploy();
-    await flComm.waitForDeployment();
-    
-    console.log("FLCommunication deployed to:", await flComm.getAddress());
-    
-    // Deploy the contribution contract
-    const FLContrib = await ethers.getContractFactory("FLContribution");
-    const flContrib = await FLContrib.deploy();
-    await flContrib.waitForDeployment();
-    
-    console.log("FLContribution deployed to:", await flContrib.getAddress());
-    
-    // Deploy the reward token (initial supply of 1,000,000 tokens)
-    const FLRewardToken = await ethers.getContractFactory("FLRewardToken");
-    const flRewardToken = await FLRewardToken.deploy(1000000);
-    await flRewardToken.waitForDeployment();
-    
-    console.log("FLRewardToken deployed to:", await flRewardToken.getAddress());
-    
-    // Deploy the reward distribution contract
-    const FLRewardDistribution = await ethers.getContractFactory("FLRewardDistribution");
-    // Set reward per round to 100 tokens
-    const flRewardDistribution = await FLRewardDistribution.deploy(
-      await flRewardToken.getAddress(),
-      await flContrib.getAddress(),
-      100
-    );
-    await flRewardDistribution.waitForDeployment();
-    
-    console.log("FLRewardDistribution deployed to:", await flRewardDistribution.getAddress());
-    
-    // Grant the distribution contract permission to mint tokens
-    await flRewardToken.transferOwnership(await flRewardDistribution.getAddress());
+  const [deployer] = await hre.ethers.getSigners();
+  console.log("Deploying contracts with the account:", deployer.address);
+
+  // Deploy FLRewardToken
+  const FLRewardToken = await hre.ethers.getContractFactory("FLRewardToken");
+  const flRewardToken = await FLRewardToken.deploy(1000000); // 1 million initial supply
+  await flRewardToken.waitForDeployment();
+  console.log("FLRewardToken deployed to:", await flRewardToken.getAddress());
+
+  // Get your contribution contract address
+  const contributionContractAddress = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0";
+  console.log("Using contribution contract at:", contributionContractAddress);
+
+  // Deploy FLRewardDistribution
+  const rewardPerRound = hre.ethers.parseEther("1000"); // 1000 tokens per round
+  const FLRewardDistribution = await hre.ethers.getContractFactory("FLRewardDistribution");
+  const flRewardDistribution = await FLRewardDistribution.deploy(
+    await flRewardToken.getAddress(),
+    contributionContractAddress,
+    rewardPerRound
+  );
+  await flRewardDistribution.waitForDeployment();
+  console.log("FLRewardDistribution deployed to:", await flRewardDistribution.getAddress());
+
+  // Transfer ownership of token contract to distribution contract
+  console.log("Transferring token ownership to distribution contract...");
+  try {
+    const tx = await flRewardToken.transferOwnership(await flRewardDistribution.getAddress());
+    await tx.wait();
     console.log("Token ownership transferred to distribution contract");
+  } catch (error) {
+    console.error("Error transferring ownership:", error.message);
   }
-  
-  main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-      console.error(error);
-      process.exit(1);
-    });
+
+  console.log("Deployment completed");
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
