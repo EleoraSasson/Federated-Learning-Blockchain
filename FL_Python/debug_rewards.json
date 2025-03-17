@@ -1,0 +1,15 @@
+{
+  "token_balances": {
+    "0x70997970C51812dc3A010C7d01b50e0d17dc79C8": 49.96135299803722,
+    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC": 50.03864700196279
+  },
+  "contributions": {
+    "1": {
+      "0x70997970C51812dc3A010C7d01b50e0d17dc79C8": 26.44312157453336,
+      "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC": 26.484031089991568
+    }
+  },
+  "distributed_rounds": [
+    "1"
+  ]
+}
