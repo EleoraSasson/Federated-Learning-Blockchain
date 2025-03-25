@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import copy
 import os
 from models import Net
@@ -9,13 +9,16 @@ from clients import FederatedClient
 from server import FederatedServer
 from utils import load_mnist_data, create_client_data
 from blockchain_connector import BlockchainConnector
+from token_ledger_db import TokenLedgerDB
 from web3 import Web3
+import matplotlib.pyplot as plt
+import numpy as np
 
 def main():
     # Configuration
-    num_clients = 2
-    num_rounds = 1 
-    client_epochs = 1
+    num_clients = 4        # Number of clients
+    num_rounds = 3           # Number of rounds for better analysis
+    client_epochs = 2        # Training epochs per client
     batch_size = 64
     learning_rate = 0.01
     enable_blockchain = True  # Set to True to enable blockchain integration
@@ -29,10 +32,19 @@ def main():
     
     # Load MNIST dataset
     train_dataset, test_dataset = load_mnist_data()
-    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
     
-    # Create client data loaders
-    client_loaders, client_test_loaders, client_data_sizes = create_client_data(train_dataset, num_clients)
+    # Create separate validation set from test data
+    test_size = len(test_dataset) // 2
+    val_size = len(test_dataset) - test_size
+    val_dataset, test_dataset_reduced = random_split(test_dataset, [val_size, test_size])
+    
+    test_loader = DataLoader(test_dataset_reduced, batch_size=128, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
+    
+    # Create client data loaders with non-IID distribution
+    client_loaders, client_test_loaders, client_data_sizes = create_client_data(
+        train_dataset, num_clients
+    )
     
     # Initialize global model
     global_model = Net(input_dim=28*28, hidden_dim=128, output_dim=10)
@@ -70,10 +82,11 @@ def main():
     else:
         print("Blockchain integration disabled. Using offline token tracking.")
     
-    # Initialize server with token ledger database
+    # Initialize server with token ledger database and validation loader
     server = FederatedServer(
         global_model=global_model,
         test_loader=test_loader,
+        validation_loader=val_loader,
         blockchain_enabled=enable_blockchain,
         token_ledger_path=token_ledger_path
     )
@@ -98,7 +111,7 @@ def main():
         ]
     else:
         # Use string identifiers for addresses in offline mode
-        client_addresses = [f"client_{i}" for i in range(5)]
+        client_addresses = [f"client_{i}" for i in range(num_clients)]
     
     # Initialize clients
     clients = []
@@ -107,7 +120,7 @@ def main():
             client_id=i,
             model=copy.deepcopy(global_model),
             data_loader=client_loaders[i],
-            test_loader=test_loader,
+            test_loader=client_test_loaders[i],  # Use client-specific test loaders
             learning_rate=learning_rate,
             epochs=client_epochs
         ))
@@ -115,15 +128,17 @@ def main():
     # Map client IDs to addresses for easier lookup
     client_addresses_by_id = {}
     for i, address in enumerate(client_addresses):
-        client_addresses_by_id[i] = address
-        # Register the device in the token ledger database
-        server.token_ledger.register_device(address, f"Client {i}")
+        if i < len(clients):  # Ensure we don't go out of bounds
+            client_addresses_by_id[i] = address
+            # Register the device in the token ledger database
+            server.token_ledger.register_device(address, f"Client {i}")
     
     # Training history for visualization
     history = {
         'global_accuracy': [],
         'client_accuracy': {i: [] for i in range(num_clients)},
-        'contributions': {i: [] for i in range(num_clients)}
+        'contributions': {i: [] for i in range(num_clients)},
+        'rewards': {addr: [] for addr in client_addresses[:num_clients]}
     }
     
     # Track contributions by round and client
@@ -156,10 +171,9 @@ def main():
                 except Exception as e:
                     print(f"Error submitting model update: {str(e)}")
         
-        # Server aggregates models and records contributions
-        # This also records contributions to the token ledger database
+        # Server aggregates models and records contributions using GQIA
         server.aggregate(client_models, client_data_sizes, 
-                         [client_addresses[i % len(client_addresses)] for i in range(len(clients))])
+                        [client_addresses[i % len(client_addresses)] for i in range(len(clients))])
         
         # Initialize round contributions tracking
         if round_idx+1 not in contributions_by_round:
@@ -171,6 +185,7 @@ def main():
                 if i < len(clients):
                     client_id = clients[i].client_id
                     history['contributions'][client_id].append(score)
+                    contributions_by_round[round_idx+1][client_id] = score
         
         # Evaluate global model
         global_accuracy = server.evaluate()
@@ -189,6 +204,24 @@ def main():
         # Display reward distribution using token ledger database
         server.display_reward_distribution(round_idx+1, 
                                           [client_addresses[i % len(client_addresses)] for i in range(len(clients))])
+        
+        # Track rewards for history
+        for i, client_id in enumerate(range(num_clients)):
+            if i < len(client_addresses):
+                try:
+                    address = client_addresses[i]
+                    balance = server.get_token_balance(address)
+                    
+                    # If this is the first round, the balance is the reward
+                    if round_idx == 0:
+                        history['rewards'][address].append(balance)
+                    else:
+                        # Otherwise, the reward is the difference from the previous balance
+                        prev_balance = sum(history['rewards'][address])
+                        reward = balance - prev_balance
+                        history['rewards'][address].append(reward)
+                except Exception as e:
+                    print(f"Error getting token balance for Client {client_id}: {str(e)}")
     
     print("\nFederated Learning Completed!")
     
@@ -229,6 +262,92 @@ def main():
     transactions = server.get_transaction_history(limit=10)
     for tx in transactions:
         print(f"Transaction {tx['tx_id'][:10]}...: {tx['device_id']} received {tx['amount']:.4f} tokens in round {tx['version']}")
+    
+    # Visualization of contribution scores vs rewards
+    plt.figure(figsize=(12, 8))
+    
+    # Plot 1: Global accuracy over rounds
+    plt.subplot(2, 2, 1)
+    plt.plot(range(1, num_rounds+1), history['global_accuracy'], 'o-', linewidth=2)
+    plt.title('Global Model Accuracy')
+    plt.xlabel('Round')
+    plt.ylabel('Accuracy (%)')
+    plt.grid(True)
+    
+    # Plot 2: Client contributions over rounds
+    plt.subplot(2, 2, 2)
+    for client_id, contributions in history['contributions'].items():
+        if contributions:
+            plt.plot(range(1, len(contributions)+1), contributions, 'o-', label=f'Client {client_id}')
+    plt.title('Client Contributions (GQIA Score)')
+    plt.xlabel('Round')
+    plt.ylabel('Contribution Score')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot 3: Client rewards over rounds
+    plt.subplot(2, 2, 3)
+    for addr, rewards in history['rewards'].items():
+        if rewards:
+            client_id = next((cid for cid, address in client_addresses_by_id.items() if address == addr), None)
+            plt.plot(range(1, len(rewards)+1), rewards, 'o-', label=f'Client {client_id}')
+    plt.title('Client Rewards per Round')
+    plt.xlabel('Round')
+    plt.ylabel('Tokens')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot 4: Correlation between contribution and reward
+    plt.subplot(2, 2, 4)
+    
+    # Prepare data for scatter plot
+    all_contributions = []
+    all_rewards = []
+    client_ids = []
+    
+    for round_idx in range(num_rounds):
+        for client_id in range(num_clients):
+            if client_id in history['contributions'] and round_idx < len(history['contributions'][client_id]):
+                contribution = history['contributions'][client_id][round_idx]
+                
+                if client_id < len(client_addresses):
+                    address = client_addresses[client_id]
+                    if address in history['rewards'] and round_idx < len(history['rewards'][address]):
+                        reward = history['rewards'][address][round_idx]
+                        
+                        all_contributions.append(contribution)
+                        all_rewards.append(reward)
+                        client_ids.append(client_id)
+    
+    # Create scatter plot
+    if all_contributions and all_rewards:
+        sc = plt.scatter(all_contributions, all_rewards, c=[client_ids], cmap='viridis', alpha=0.7)
+        
+        # Add trend line
+        if len(all_contributions) > 1:
+            z = np.polyfit(all_contributions, all_rewards, 1)
+            p = np.poly1d(z)
+            plt.plot(sorted(all_contributions), p(sorted(all_contributions)), "r--", alpha=0.7)
+        
+        plt.title('Contribution vs Reward')
+        plt.xlabel('Contribution Score')
+        plt.ylabel('Reward (Tokens)')
+        plt.colorbar(sc, label='Client ID')
+        plt.grid(True)
+    
+    plt.tight_layout()
+    
+    # Make sure data directory exists
+    os.makedirs("data", exist_ok=True)
+    
+    plt.savefig('data/fl_analysis.png')
+    print(f"\nVisualization saved to data/fl_analysis.png")
+    
+    try:
+        plt.show()
+    except Exception as e:
+        print(f"Error displaying plot: {e}")
+        print("Plot saved to file even though display failed.")
 
 if __name__ == "__main__":
     main()

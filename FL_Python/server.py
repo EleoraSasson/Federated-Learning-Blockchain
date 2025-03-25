@@ -5,16 +5,17 @@ import hashlib
 from blockchain_connector import BlockchainConnector
 from debug_rewards import DebugRewardTracker
 from token_ledger_db import TokenLedgerDB
-
+from gradient_quality_impact import GradientQualityImpactAssessment
 
 class FederatedServer:
-    def __init__(self, global_model, test_loader=None, blockchain_enabled=False, token_ledger_path="token_ledger.db"):
+    def __init__(self, global_model, test_loader=None, validation_loader=None, blockchain_enabled=False, token_ledger_path="token_ledger.db"):
         """
         Initialize the federated learning server.
         
         Args:
             global_model: The initial global model
             test_loader: DataLoader for testing the global model
+            validation_loader: Optional separate validation set
             blockchain_enabled: Whether to enable blockchain integration
             token_ledger_path: Path to the token ledger database
         """
@@ -22,6 +23,7 @@ class FederatedServer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.global_model.to(self.device)
         self.test_loader = test_loader
+        self.validation_loader = validation_loader
         self.current_round = 0
         self.blockchain_enabled = blockchain_enabled
         self.blockchain = None
@@ -32,6 +34,15 @@ class FederatedServer:
         # Keep debug reward tracker for backward compatibility
         self.debug_rewards = DebugRewardTracker(reward_per_round=100.0)
         
+        # Initialize the Gradient Quality Impact Assessment system
+        if test_loader is not None:
+            self.gqia = GradientQualityImpactAssessment(
+                test_loader=test_loader,
+                validation_loader=validation_loader
+            )
+        else:
+            self.gqia = None
+            
         if blockchain_enabled:
             print("Blockchain integration enabled")
             print("Using token ledger database for offline backup")
@@ -83,20 +94,31 @@ class FederatedServer:
         
         return model_hash
     
-    def calculate_contribution(self, global_model_before, client_model):
+    def calculate_contribution(self, global_model_before, client_model, client_data_size=1):
         """
-        Calculate a client's contribution to the global model.
+        Calculate a client's contribution to the global model using GQIA.
         
         Args:
             global_model_before: The global model before update
             client_model: The client's updated model
+            client_data_size: Size of the client's dataset
             
         Returns:
             A contribution score (0-100)
         """
-        # Simple implementation - can be replaced with your sophisticated metric
-        contribution_score = 0
+        # If GQIA is available, use it for advanced contribution measurement
+        if self.gqia is not None:
+            try:
+                contribution_score = self.gqia.evaluate_contribution(
+                    global_model_before, client_model, client_data_size
+                )
+                print(f"GQIA contribution score: {contribution_score:.2f}")
+                return contribution_score
+            except Exception as e:
+                print(f"Error using GQIA for contribution calculation: {str(e)}")
+                print("Falling back to simple contribution calculation...")
         
+        # Fall back to simple contribution calculation if GQIA fails or is not available
         # Calculate magnitude of weight updates
         total_diff = 0
         total_weight = 0
@@ -113,7 +135,9 @@ class FederatedServer:
         # Normalize to a 0-100 score
         if total_weight > 0:
             contribution_score = min(100, (total_diff / total_weight) * 100)
-        
+        else:
+            contribution_score = 0
+            
         return contribution_score
     
     def record_contribution(self, participant, round_id, contribution_score):
@@ -156,7 +180,7 @@ class FederatedServer:
     
     def aggregate(self, client_models, client_data_sizes=None, client_addresses=None):
         """
-        Aggregate client models and record contributions.
+        Aggregate client models and record contributions using GQIA for quality assessment.
         
         Args:
             client_models: List of client models
@@ -199,15 +223,38 @@ class FederatedServer:
             except Exception as e:
                 print(f"Error publishing global model: {str(e)}")
         
+        # Get a detailed analysis of contributions if GQIA is available
+        if self.gqia is not None and client_addresses is not None:
+            try:
+                detailed_analysis = self.gqia.analyze_contributions(
+                    global_model_before, client_models, client_data_sizes, client_addresses
+                )
+                
+                print("\n=== Detailed Contribution Analysis ===")
+                for client in detailed_analysis['clients']:
+                    client_id = client['client_id']
+                    print(f"\nClient {client_id}:")
+                    print(f"  Performance Impact: {client['performance_impact']:.4f}")
+                    print(f"  Gradient Stability: {client['gradient_stability']:.4f}")
+                    print(f"  Generalization Impact: {client['generalization_impact']:.4f}")
+                    print(f"  Final Score: {client['final_score']:.2f}")
+                    
+                # Clear the cache to free memory
+                self.gqia.clear_cache()
+            except Exception as e:
+                print(f"Error analyzing contributions with GQIA: {str(e)}")
+        
         # Store contribution scores for later use
         self.contribution_scores = []
         
         # Record individual contributions if client addresses provided
         if client_addresses is not None:
-            for i, (client_model, address) in enumerate(zip(client_models, client_addresses)):
+            for i, (client_model, data_size, address) in enumerate(zip(client_models, client_data_sizes, client_addresses)):
                 if i < len(client_models):  # Make sure we don't go out of bounds
                     # Calculate contribution
-                    contribution_score = self.calculate_contribution(global_model_before, client_model)
+                    contribution_score = self.calculate_contribution(
+                        global_model_before, client_model, data_size
+                    )
                     self.contribution_scores.append(contribution_score)
                     
                     # Record contribution (will use blockchain or token ledger)
