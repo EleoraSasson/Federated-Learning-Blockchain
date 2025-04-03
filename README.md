@@ -6,7 +6,6 @@ A federated learning system integrated with blockchain for transparency, account
 Federated Learning enables collaborative model training without sharing raw data. Blockchain ensures verifiable contribution tracking and immutable record-keeping.
 
 ### Features
-- Decentralized model training with federated averaging
 - Transparent tracking via smart contracts
 - Immutable model updates and contributions
 - Reward mechanisms based on contribution metrics
@@ -17,6 +16,7 @@ Federated Learning enables collaborative model training without sharing raw data
 - **Server**: Aggregates model updates and tracks contributions
 - **Clients**: Train models locally and submit updates
 - **Models**: Neural networks for the learning task
+- **Gradient quality impact**: computes the GQIA score
 
 ### Blockchain Integration
 - **Smart Contracts**: Store and verify contributions
@@ -30,6 +30,9 @@ Federated Learning enables collaborative model training without sharing raw data
 ## Smart Contracts
 1. **FLCommunication**: Manages federated learning rounds
 2. **FLContribution**: Records and tracks contributions
+3. **FLRewardToken**: Mints the tokens
+4. **FLRewardDistribution**: distributes the rewards according to the GQIA score
+
 
 ## Setup
 
@@ -68,23 +71,22 @@ python main.py
 ## Project Structure
 ```
 federated-learning-blockchain/
-├── federated-contracts/        # Smart contracts
-│   ├── contracts/              # FLCommunication.sol, FLContribution.sol
-│   ├── scripts/                # Deployment scripts
-│   └── test/                   # Contract tests
-├── FL_Python/                  # Python implementation
-│   ├── blockchain/             # ABI & blockchain connector
-│   ├── main.py                 # Execution script
-│   ├── clients.py, server.py   # FL components
-│   ├── models.py               # Neural network models
-│   └── utils.py                # Utility functions
+├── federated-contracts/            # Smart contracts
+│   ├── contracts/                  # FLCommunication.sol, FLContribution.sol
+│   ├── scripts/                    # Deployment scripts
+│   └── test/                       # Contract tests
+├── FL_Python/                      # Python implementation
+│   ├── blockchain/                 # ABI & blockchain connector
+│   ├── main.py                     # Execution script
+│   ├── clients.py, server.py       # FL components
+|   |__ gradient_quality_impact.py  #GQIA
+│   ├── models.py                   # Neural network models
+│   └── utils.py                    # Utility functions
 ├── .gitignore
 └── README.md
 ```
 
-## Contribution Calculation
-- Evaluates magnitude, impact, and consistency of model updates
-- Recorded on-chain for incentivization and rewards
+
 
 ## Results (MNIST Dataset)
 - Accuracy improvement: **93% → 98%** (10 rounds)

@@ -16,9 +16,9 @@ import numpy as np
 
 def main():
     # Configuration
-    num_clients = 4        # Number of clients
+    num_clients = 5        # Number of clients
     num_rounds = 3           # Number of rounds for better analysis
-    client_epochs = 2        # Training epochs per client
+    client_epochs = 10        # Training epochs per client
     batch_size = 64
     learning_rate = 0.01
     enable_blockchain = True  # Set to True to enable blockchain integration
